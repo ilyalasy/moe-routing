@@ -165,7 +165,7 @@ if __name__ == "__main__":
     )
     ds_en = ds.filter(lambda r: json.loads(r["meta"])["language"] == "en")
 
-    num_rows = int(ds_en.num_rows * args.subset_size)
+    num_rows = int(ds_en["train"].num_rows * args.subset_size)
     ds_en = ds_en["train"].select(range(num_rows))
 
     tokenize, group_texts = get_preproc_funcs(tokenizer)
