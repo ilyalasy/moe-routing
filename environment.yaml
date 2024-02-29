@@ -1,0 +1,8 @@
+name: moe
+channels:
+  - nvidia/label/cuda-12.1.0
+  - defaults
+dependencies:
+  - python=3.10
+  - cuda=12.1  
+prefix: /home/fs72277/ilyalasy/.conda/envs/moe
