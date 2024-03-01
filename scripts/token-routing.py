@@ -149,6 +149,8 @@ def run_inference(args):
     model, dataloader = accelerator.prepare(model, dataloader)    
 
     if accelerator.is_main_process:
+        accelerator.print("Datasets cache path: ", os.environ.get("HF_DATASETS_CACHE", ""))
+        accelerator.print("Models cache path: ", os.environ.get("HF_HOME", ""))
         accelerator.print(f"Using {accelerator.num_processes} processes!") 
 
     result = defaultdict(list)
@@ -208,8 +210,5 @@ if __name__ == "__main__":
         help="number of workers for data loader",
     )
     args = parser.parse_args()
-
-    print("Datasets cache path: ", os.environ.get("HF_DATASETS_CACHE", ""))
-    print("Models cache path: ", os.environ.get("HF_HOME", ""))
 
     run_inference(args)
