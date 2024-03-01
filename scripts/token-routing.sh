@@ -4,6 +4,7 @@
 # python -m pip install -r ./ColossalAI/examples/language/openmoe/requirements.txt
 
 # Change this vars if needed
-export HF_DATASETS_CACHE="$HOME/.cache/huggingface/datasets"
-export HF_HOME="$HOME/.cache/huggingface/hub"
-python token-routing.py
+export HF_DATASETS_CACHE="$DATA/huggingface/datasets"
+export HF_HOME="$DATA/huggingface/hub"
+accelerate launch --config_file default_config.yaml token-routing.py --output $HOME/repos/output/experts.pt --subset_size 0.1 \
+    --model "8b-1T" --batch_size 4 --num_workers 8
