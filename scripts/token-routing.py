@@ -1,12 +1,14 @@
 import os
 import json
 import argparse
+from typing import Dict, List
 import numpy as np
 from pathlib import Path
-from datasets import load_dataset,load_from_disk
+from datasets import load_dataset, load_from_disk
 from collections import defaultdict
 
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
@@ -16,7 +18,8 @@ from colossalai.moe.routers import Top2Router
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from accelerate import Accelerator
-from accelerate.utils import tqdm
+from accelerate.utils import tqdm, gather_object
+
 
 # # Install ColossalAI
 # !git clone https://github.com/Orion-Zheng/ColossalAI.git
@@ -103,16 +106,18 @@ def get_batch_results(sample, activated_experts, batch_i, batch_size):
     return res
 
 
-def get_dataloader(args,tokenizer):    
+def get_dataloader(args, tokenizer):
     data_dir = Path(os.environ.get("DATA")) / "datasets/redpajama-preproc"
-    data_dir.mkdir(parents=True,exist_ok=True)
+    data_dir.mkdir(parents=True, exist_ok=True)
     ds_path = data_dir / f"v0-{args.subset_size}-{args.seq_len}"
 
     if ds_path.exists():
         samples = load_from_disk(ds_path)
     else:
         ds = load_dataset(
-            "togethercomputer/RedPajama-Data-V2", name="sample", languages=["en"]
+            "togethercomputer/RedPajama-Data-V2",
+            name="sample",
+            languages=["en"],
         )
         ds_en = ds.filter(lambda r: json.loads(r["meta"])["language"] == "en")
 
@@ -128,14 +133,39 @@ def get_dataloader(args,tokenizer):
             remove_columns=tokenized.column_names,
         )
         samples.save_to_disk(ds_path)
-    
-    samples = samples.with_format("torch")
-    return DataLoader(samples,batch_size=args.batch_size, num_workers=args.num_workers)
 
-def run_inference(args):    
+    samples = samples.with_format("torch")
+    return DataLoader(
+        samples, batch_size=args.batch_size, num_workers=args.num_workers
+    )
+
+
+def _gather_dict(
+    num_processes: int, result_dict: Dict[str, List[str | torch.Tensor]]
+):
+    output_objects = [None for _ in range(num_processes)]
+    dist.all_gather_object(output_objects, result_dict)
+    gathered = defaultdict(list)
+    for obj in output_objects:
+        for k, v in obj.items():
+            gathered[k].extend(v)
+    return _stack_tensors(gathered, to_cpu=True)
+
+
+def _stack_tensors(
+    dict_of_tensors: Dict[str, List[str | torch.Tensor]], to_cpu=False
+):
+    for k, v in dict_of_tensors.items():
+        if isinstance(v[0], torch.Tensor):
+            v = [t.cpu() for t in v] if to_cpu else v
+            dict_of_tensors[k] = torch.stack(v)
+    return dict_of_tensors
+
+
+def run_inference(args):
     model_path = (
         f"OrionZheng/openmoe-{args.model}"  # "OrionZheng/openmoe-8b-1T" #
-    )    
+    )
     tokenizer = AutoTokenizer.from_pretrained(
         model_path,
         trust_remote_code=True,
@@ -143,8 +173,7 @@ def run_inference(args):
         use_fast=True,
     )
 
-    dataloader = get_dataloader(args,tokenizer)
-
+    dataloader = get_dataloader(args, tokenizer)
 
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
@@ -152,38 +181,42 @@ def run_inference(args):
         # device_map="auto",
         resume_download=True,
     )
-    activated_experts, hooks = set_router_hook(model)    
-    
+    activated_experts, hooks = set_router_hook(model)
+
     accelerator = Accelerator()
-    model, dataloader = accelerator.prepare(model, dataloader)    
+    model, dataloader = accelerator.prepare(model, dataloader)
 
     if accelerator.is_main_process:
-        accelerator.print("Datasets cache path: ", os.environ.get("HF_DATASETS_CACHE", ""))
+        accelerator.print(
+            "Datasets cache path: ", os.environ.get("HF_DATASETS_CACHE", "")
+        )
         accelerator.print("Models cache path: ", os.environ.get("HF_HOME", ""))
-        accelerator.print(f"Using {accelerator.num_processes} processes!") 
+        accelerator.print(f"Using {accelerator.num_processes} processes!")
 
     result = defaultdict(list)
-    for batch_i, sample in tqdm(iterable=enumerate(dataloader), total=len(dataloader)):        
-        outputs = model.generate(
+    for batch_i, sample in tqdm(
+        iterable=enumerate(dataloader), total=len(dataloader)
+    ):
+        model(
             input_ids=sample["input_ids"],
             attention_mask=sample["attention_mask"],
-            max_new_tokens=1,
         )
         batch_res = get_batch_results(
             sample, activated_experts, batch_i, args.batch_size
         )
         for k, v in batch_res.items():
             result[k].extend(v)
-    for k,v in result.items():
-        result[k] = torch.tensor(v,device=accelerator.device)
+    result = _stack_tensors(result)
+
     assert len(list(result.values())[0]) == (batch_i + 1) * args.batch_size
-    
-    if accelerator.is_main_process():
-        accelerator.wait_for_everyone()
-        final_results = accelerator.gather(result)    
-        args.output.parent.mkdir(parents=True,exist_ok=True)
-        accelerator.save(final_results, args.output)        
+
+    accelerator.wait_for_everyone()
+    final_results = _gather_dict(accelerator.num_processes, result)
+    if accelerator.is_main_process:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        accelerator.save(final_results, args.output)
         print(f"Saved to {args.output}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -198,7 +231,10 @@ if __name__ == "__main__":
         "--output", default="output/experts.pt", type=Path, help="output path"
     )
     parser.add_argument(
-        "--subset_size", default=0.1, type=float, help="Size (in percentage) of the subset of RedPajama to use."
+        "--subset_size",
+        default=0.1,
+        type=float,
+        help="Size (in percentage) of the subset of RedPajama to use.",
     )
     parser.add_argument(
         "--batch_size",
