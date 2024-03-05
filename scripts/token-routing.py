@@ -103,30 +103,36 @@ def get_batch_results(sample, activated_experts, batch_i, batch_size):
     return res
 
 
-def get_dataloader(args,tokenizer):
-    ds = load_dataset(
-        "togethercomputer/RedPajama-Data-V2", name="sample", languages=["en"]
-    )
-    ds_en = ds.filter(lambda r: json.loads(r["meta"])["language"] == "en")
+def get_dataloader(args,tokenizer):    
+    data_dir = Path(os.environ.get("DATA")) / "datasets/redpajama-preproc"
+    data_dir.mkdir(parents=True,exist_ok=True)
+    ds_path = data_dir / f"v0-{args.subset_size}-{args.seq_len}"
 
-    num_rows = int(ds_en["train"].num_rows * args.subset_size)
-    ds_en = ds_en["train"].select(range(num_rows))
+    if ds_path.exists():
+        samples = load_dataset(ds_path)
+    else:
+        ds = load_dataset(
+            "togethercomputer/RedPajama-Data-V2", name="sample", languages=["en"]
+        )
+        ds_en = ds.filter(lambda r: json.loads(r["meta"])["language"] == "en")
 
-    tokenize, group_texts = get_preproc_funcs(tokenizer)
-    tokenized = ds_en.map(tokenize, batched=True)
-    samples = tokenized.map(
-        group_texts,
-        batched=True,
-        batch_size=1000,
-        remove_columns=tokenized.column_names,
-    )
+        num_rows = int(ds_en["train"].num_rows * args.subset_size)
+        ds_en = ds_en["train"].select(range(num_rows))
+
+        tokenize, group_texts = get_preproc_funcs(tokenizer)
+        tokenized = ds_en.map(tokenize, batched=True)
+        samples = tokenized.map(
+            group_texts,
+            batched=True,
+            batch_size=1000,
+            remove_columns=tokenized.column_names,
+        )
+        samples.save_to_disk(ds_path)
 
     samples = samples.with_format("torch")
-
     return DataLoader(samples,batch_size=args.batch_size, num_workers=args.num_workers)
 
-def run_inference(args):
-
+def run_inference(args):    
     model_path = (
         f"OrionZheng/openmoe-{args.model}"  # "OrionZheng/openmoe-8b-1T" #
     )    
@@ -136,15 +142,18 @@ def run_inference(args):
         model_max_length=args.seq_len,
         use_fast=True,
     )
+
+    dataloader = get_dataloader(args,tokenizer)
+
+
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
         trust_remote_code=True,
         # device_map="auto",
         resume_download=True,
     )
-    activated_experts, hooks = set_router_hook(model)
-    dataloader = get_dataloader(args,tokenizer)
-
+    activated_experts, hooks = set_router_hook(model)    
+    
     accelerator = Accelerator()
     model, dataloader = accelerator.prepare(model, dataloader)    
 
