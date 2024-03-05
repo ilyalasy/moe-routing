@@ -161,8 +161,21 @@ def _stack_tensors(
             dict_of_tensors[k] = torch.stack(v)
     return dict_of_tensors
 
+def _print_vram_info():
+    free, total = torch.cuda.mem_get_info()
+    free = free / 1024 ** 3
+    total = total / 1024 ** 3
+    print(f"GPU {torch.cuda.current_device()}: {total - free:.2f}/{total:.2f} GB")
 
 def run_inference(args):
+    accelerator = Accelerator()
+    if accelerator.is_main_process:
+        accelerator.print(
+            "Datasets cache path: ", os.environ.get("HF_DATASETS_CACHE", "")
+        )
+        accelerator.print("Models cache path: ", os.environ.get("HF_HOME", ""))
+        accelerator.print(f"Using {accelerator.num_processes} processes!")
+
     model_path = (
         f"OrionZheng/openmoe-{args.model}"  # "OrionZheng/openmoe-8b-1T" #
     )
@@ -178,21 +191,15 @@ def run_inference(args):
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
         trust_remote_code=True,
-        # device_map="auto",
+        device_map="auto",
         resume_download=True,
     )
-    activated_experts, hooks = set_router_hook(model)
+    _print_vram_info()    
 
-    accelerator = Accelerator()
+    activated_experts, hooks = set_router_hook(model)    
     model, dataloader = accelerator.prepare(model, dataloader)
-
-    if accelerator.is_main_process:
-        accelerator.print(
-            "Datasets cache path: ", os.environ.get("HF_DATASETS_CACHE", "")
-        )
-        accelerator.print("Models cache path: ", os.environ.get("HF_HOME", ""))
-        accelerator.print(f"Using {accelerator.num_processes} processes!")
-
+    # accelerator.prepare_data_loader()
+    
     result = defaultdict(list)
     for batch_i, sample in tqdm(
         iterable=enumerate(dataloader), total=len(dataloader)
