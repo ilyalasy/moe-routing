@@ -3,7 +3,7 @@ import json
 import argparse
 import numpy as np
 from pathlib import Path
-from datasets import load_dataset
+from datasets import load_dataset,load_from_disk
 from collections import defaultdict
 
 import torch
@@ -109,7 +109,7 @@ def get_dataloader(args,tokenizer):
     ds_path = data_dir / f"v0-{args.subset_size}-{args.seq_len}"
 
     if ds_path.exists():
-        samples = load_dataset(ds_path)
+        samples = load_from_disk(ds_path)
     else:
         ds = load_dataset(
             "togethercomputer/RedPajama-Data-V2", name="sample", languages=["en"]
@@ -128,7 +128,7 @@ def get_dataloader(args,tokenizer):
             remove_columns=tokenized.column_names,
         )
         samples.save_to_disk(ds_path)
-
+    
     samples = samples.with_format("torch")
     return DataLoader(samples,batch_size=args.batch_size, num_workers=args.num_workers)
 
@@ -163,7 +163,7 @@ def run_inference(args):
         accelerator.print(f"Using {accelerator.num_processes} processes!") 
 
     result = defaultdict(list)
-    for batch_i, sample in tqdm(enumerate(dataloader), total=len(dataloader)):        
+    for batch_i, sample in tqdm(iterable=enumerate(dataloader), total=len(dataloader)):        
         outputs = model.generate(
             input_ids=sample["input_ids"],
             attention_mask=sample["attention_mask"],
@@ -198,7 +198,7 @@ if __name__ == "__main__":
         "--output", default="output/experts.pt", type=Path, help="output path"
     )
     parser.add_argument(
-        "--subset_size", default=1.0, type=float, help="Size (in percentage) of the subset of RedPajama to use."
+        "--subset_size", default=0.1, type=float, help="Size (in percentage) of the subset of RedPajama to use."
     )
     parser.add_argument(
         "--batch_size",
