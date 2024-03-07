@@ -15,9 +15,9 @@ from torch.utils.data import DataLoader
 # mp.set_start_method("spawn", force=True)
 
 from colossalai.moe.routers import Top2Router
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
 
-from accelerate import Accelerator
+from accelerate import Accelerator,init_empty_weights
 from accelerate.utils import tqdm, gather_object
 
 
@@ -162,10 +162,11 @@ def _stack_tensors(
     return dict_of_tensors
 
 def _print_vram_info():
-    free, total = torch.cuda.mem_get_info()
-    free = free / 1024 ** 3
-    total = total / 1024 ** 3
-    print(f"GPU {torch.cuda.current_device()}: {total - free:.2f}/{total:.2f} GB")
+    for i in range(torch.cuda.device_count()):
+        free, total = torch.cuda.mem_get_info(i)
+        free = free / 1024 ** 3
+        total = total / 1024 ** 3
+        print(f"GPU {i}: {total - free:.2f}/{total:.2f} GB")
 
 def run_inference(args):
     accelerator = Accelerator()
@@ -188,16 +189,20 @@ def run_inference(args):
 
     dataloader = get_dataloader(args, tokenizer)
 
+    # config = AutoConfig.from_pretrained(model_path)
+    # with init_empty_weights():
+    #     model = AutoModelForCausalLM.from_config(config,trust_remote_code=True)
+
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
         trust_remote_code=True,
         device_map="auto",
         resume_download=True,
     )
-    _print_vram_info()    
+    _print_vram_info()
 
     activated_experts, hooks = set_router_hook(model)    
-    model, dataloader = accelerator.prepare(model, dataloader)
+    # model, dataloader = accelerator.prepare(model, dataloader)
     # accelerator.prepare_data_loader()
     
     result = defaultdict(list)
@@ -205,8 +210,8 @@ def run_inference(args):
         iterable=enumerate(dataloader), total=len(dataloader)
     ):
         model(
-            input_ids=sample["input_ids"],
-            attention_mask=sample["attention_mask"],
+            input_ids=sample["input_ids"].to(model.device),
+            attention_mask=sample["attention_mask"].to(model.device),
         )
         batch_res = get_batch_results(
             sample, activated_experts, batch_i, args.batch_size
