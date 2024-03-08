@@ -5,4 +5,3 @@ channels:
 dependencies:
   - python=3.10
   - cuda=12.1  
-prefix: /home/fs72277/ilyalasy/.conda/envs/moe
