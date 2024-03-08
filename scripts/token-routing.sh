@@ -5,7 +5,5 @@ export HF_HOME="$DATA/huggingface/hub"
 export CUDA_VISIBLE_DEVICES="0,2,3"
 export PYTHONPATH=$PWD
 
-script_full_path=$(dirname "$0")
-
 python $PWD/inference/run.py --output $HOME/repos/output --subset_size 0.01 \
     --seq_len 256 --model "8b" --batch_size 1 --num_workers 8
