@@ -30,17 +30,23 @@ from colossalai.moe.layers import SparseMLP
 from colossalai.moe.manager import MOE_MANAGER
 from colossalai.moe.utils import get_activation, set_moe_args
 from torch import nn
-from transformers.modeling_outputs import (BaseModelOutputWithPast,
-                                           CausalLMOutputWithPast)
+from transformers.modeling_outputs import (
+    BaseModelOutputWithPast,
+    CausalLMOutputWithPast,
+)
 from transformers.modeling_utils import PreTrainedModel
 from transformers.models.llama.modeling_llama import LlamaConfig, LlamaRMSNorm
-from transformers.utils import (add_start_docstrings,
-                                add_start_docstrings_to_model_forward, logging,
-                                replace_return_docstrings)
+from transformers.utils import (
+    add_start_docstrings,
+    add_start_docstrings_to_model_forward,
+    logging,
+    replace_return_docstrings,
+)
 
 if HAS_TRITON:
-    from colossalai.kernel.triton.llama_act_combine_kernel import \
-        LlamaActCombine
+    from colossalai.kernel.triton.llama_act_combine_kernel import (
+        LlamaActCombine,
+    )
 
 logger = logging.get_logger(__name__)
 

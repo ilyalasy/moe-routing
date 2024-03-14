@@ -9,7 +9,7 @@ import torch
 from datasets import load_dataset, load_from_disk
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from transformers import AutoConfig, AutoTokenizer
+from transformers import AutoConfig, AutoTokenizer, PreTrainedTokenizer
 
 from inference.hooks import set_router_hook
 from inference.utils import print_vram_info, set_openmoe_args, stack_tensors
@@ -96,11 +96,39 @@ def get_dataloader(args, tokenizer):
     )
 
 
+def run_test_sequence(
+    tokenizer: PreTrainedTokenizer, model: OpenMoeForCausalLM
+):
+    input_str = """```
+y = list(map(int, ['1', 'hello', '2']))
+```
+What error does this program produce?
+ValueError: invalid literal for int() with base 10: 'hello'
+
+```
+sum = 0
+for i in range(100):
+        sum += i
+```
+What is the value of sum immediately after the 10th time line 3 is executed?"""
+
+    input_ids = tokenizer(
+        "<pad>" + input_str, return_tensors="pt", add_special_tokens=False
+    )
+    input_ids = input_ids.input_ids.cuda()
+    generation_output = model.generate(
+        input_ids, use_cache=True, do_sample=True, max_new_tokens=32
+    )
+    out = tokenizer.decode(generation_output[0], skip_special_tokens=False)
+    print(f"output: \n{out}\n")
+
+
 def run_inference(args):
     print("Datasets cache path: ", os.environ.get("HF_DATASETS_CACHE", ""))
     print("Models cache path: ", os.environ.get("HF_HOME", ""))
 
-    model_path = f"hpcai-tech/openmoe-{args.model}"
+    # model_path = f"hpcai-tech/openmoe-{args.model}"
+    model_path = f"OrionZheng/openmoe-{args.model}"
 
     tokenizer = AutoTokenizer.from_pretrained(
         "google/umt5-small",
@@ -119,6 +147,9 @@ def run_inference(args):
         model_path, config=config, device_map="auto"
     )
     print_vram_info()
+
+    ## Uncomment to check whether the checkpoint is valid and model can produce reasonable text
+    # run_test_sequence(tokenizer,model)
 
     activated_experts, hooks = set_router_hook(model)
 
@@ -153,10 +184,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model",
-        default="8b",
+        default="8b-1T",
         type=str,
         help="model path",
-        choices=["base", "8b"],
+        choices=["base", "8b-1T"],
     )
     parser.add_argument(
         "--output", default="output", type=Path, help="output path"
