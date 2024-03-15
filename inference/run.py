@@ -136,6 +136,7 @@ def run_inference(args):
     # run_test_sequence(runner.tokenizer,runner.model)
 
     result = defaultdict(list)
+    save_step = int(len(dataloader) * 0.1)  # Save every 10% of the dataset
     for batch_i, sample in tqdm(
         iterable=enumerate(dataloader), total=len(dataloader)
     ):
@@ -149,8 +150,7 @@ def run_inference(args):
         for k, v in batch_res.items():
             result[k].extend(v)
 
-        # save every 1000 batches
-        if batch_i % 1000 == 0:
+        if batch_i % save_step == 0:
             output_file = f"{args.model}-experts-{batch_i}.pt"
             batch_res = stack_tensors(result)
             args.output.mkdir(parents=True, exist_ok=True)
@@ -184,13 +184,13 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--batch_size",
-        default=1,
+        default=24,
         type=int,
         help="batch size for model inference",
     )
     parser.add_argument(
         "--seq_len",
-        default=256,
+        default=512,
         type=int,
         help="max length of sample sequence length",
     )
