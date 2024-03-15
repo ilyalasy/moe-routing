@@ -20,5 +20,5 @@ pip install -r requirements.txt
 See [EDA notebook](https://github.com/Misterion777/moe-experiments/blob/main/notebooks/routing_eda.ipynb)
 
 ## TODO
-- [ ] Support for Mixtral
-- [ ] Support for DeepSeek
+- [x] Support Mixtral
+- [ ] Support DeepSeek

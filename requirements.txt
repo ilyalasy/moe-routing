@@ -1,7 +1,9 @@
 # This file may be used to create an environment using:
 # $ conda create --name <env> --file <this file>
 # platform: linux-64
-accelerate=0.27.2=pypi_0
-black=24.2.0=pypi_0
 pytorch=2.2.1=py3.10_cuda11.8_cudnn8.7.0_0
 pytorch-cuda=11.8=h7e8668a_5
+accelerate=0.27.2=pypi_0
+transformers>=4.38.2
+black=24.2.0=pypi_0
+autoawq>=0.2.3

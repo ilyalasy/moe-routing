@@ -1,11 +1,12 @@
 from collections import defaultdict
 from copy import copy
-from typing import Dict, List
+from typing import Callable, Dict, List
 
 import torch
 import torch.distributed as dist
 from colossalai.moe.utils import set_moe_args
 from transformers import LlamaConfig
+import http.client
 
 
 def set_openmoe_args(
@@ -112,3 +113,15 @@ def print_vram_info():
         free = free / 1024**3
         total = total / 1024**3
         print(f"GPU {i}: {total - free:.2f}/{total:.2f} GB")
+
+
+def run_with_retries(
+    func: Callable, exception=http.client.IncompleteRead, retries=10, **kwargs
+):
+    for _ in range(retries):
+        try:
+            return func(**kwargs)
+        except exception as e:
+            print(e)
+            print("Retrying...")
+            continue

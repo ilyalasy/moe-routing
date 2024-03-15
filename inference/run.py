@@ -9,10 +9,10 @@ import torch
 from datasets import load_dataset, load_from_disk
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from transformers import AutoConfig, AutoTokenizer, PreTrainedTokenizer
+from transformers import PreTrainedTokenizer
 
-from inference.hooks import set_router_hook
-from inference.utils import print_vram_info, set_openmoe_args, stack_tensors
+from inference.runner import MoERunner
+from inference.utils import print_vram_info, stack_tensors
 from models.modelling_openmoe import OpenMoeForCausalLM
 
 
@@ -62,12 +62,12 @@ def get_batch_results(sample, activated_experts, batch_i, batch_size):
     return res
 
 
-def get_dataloader(args, tokenizer):
+def get_dataloader(args, tokenizer, force_load=False):
     data_dir = Path(os.environ.get("DATA")) / "datasets/redpajama-preproc"
     data_dir.mkdir(parents=True, exist_ok=True)
-    ds_path = data_dir / f"v0-{args.subset_size}-{args.seq_len}"
+    ds_path = data_dir / f"v0-{args.model}-{args.subset_size}-{args.seq_len}"
 
-    if ds_path.exists():
+    if ds_path.exists() and not force_load:
         samples = load_from_disk(ds_path)
     else:
         ds = load_dataset(
@@ -124,42 +124,24 @@ What is the value of sum immediately after the 10th time line 3 is executed?"""
 
 
 def run_inference(args):
+
     print("Datasets cache path: ", os.environ.get("HF_DATASETS_CACHE", ""))
     print("Models cache path: ", os.environ.get("HF_HOME", ""))
 
-    # model_path = f"hpcai-tech/openmoe-{args.model}"
-    model_path = f"OrionZheng/openmoe-{args.model}"
-
-    tokenizer = AutoTokenizer.from_pretrained(
-        "google/umt5-small",
-        model_max_length=args.seq_len,
-    )
-
-    dataloader = get_dataloader(args, tokenizer)
-    config = AutoConfig.from_pretrained(model_path)
-    set_openmoe_args(
-        config,
-        num_experts=config.num_experts,
-        moe_layer_interval=config.moe_layer_interval,
-        enable_kernel=False,
-    )
-    model = OpenMoeForCausalLM.from_pretrained(
-        model_path, config=config, device_map="auto"
-    )
+    runner = MoERunner.from_name(args.model, args.seq_len)
+    dataloader = get_dataloader(args, runner.tokenizer)
     print_vram_info()
 
     ## Uncomment to check whether the checkpoint is valid and model can produce reasonable text
-    # run_test_sequence(tokenizer,model)
-
-    activated_experts, hooks = set_router_hook(model)
+    # run_test_sequence(runner.tokenizer,runner.model)
 
     result = defaultdict(list)
     for batch_i, sample in tqdm(
         iterable=enumerate(dataloader), total=len(dataloader)
     ):
-        model(
-            input_ids=sample["input_ids"].cuda(),
-            attention_mask=sample["input_ids"].cuda(),
+        activated_experts = runner(
+            input_ids=sample["input_ids"],
+            attention_mask=sample["attention_mask"],
         )
         batch_res = get_batch_results(
             sample, activated_experts, batch_i, args.batch_size
@@ -169,25 +151,27 @@ def run_inference(args):
 
         # save every 1000 batches
         if batch_i % 1000 == 0:
+            output_file = f"{args.model}-experts-{batch_i}.pt"
             batch_res = stack_tensors(result)
             args.output.mkdir(parents=True, exist_ok=True)
-            torch.save(batch_res, args.output / f"experts-{batch_i}.pt")
-            print(f"Saved to {args.output / f'experts-{batch_i}.pt'}")
+            torch.save(batch_res, args.output / output_file)
+            print(f"Saved to {args.output / output_file}")
 
     result = stack_tensors(result)
     args.output.mkdir(parents=True, exist_ok=True)
-    torch.save(result, args.output / "experts.pt")
-    print(f"Saved to {args.output / f'experts.pt'}")
+    output_file = f"{args.model}-experts.pt"
+    torch.save(result, args.output / output_file)
+    print(f"Saved to {args.output / output_file}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model",
-        default="8b-1T",
+        default="mixtral",
         type=str,
-        help="model path",
-        choices=["base", "8b-1T"],
+        help="MoE Model name",
+        choices=["openmoe", "mixtral"],
     )
     parser.add_argument(
         "--output", default="output", type=Path, help="output path"
