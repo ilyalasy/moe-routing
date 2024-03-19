@@ -55,10 +55,12 @@ def get_preproc_funcs(tokenizer):
     return tokenization, group_texts
 
 
-def get_batch_results(sample, activated_experts, batch_i, batch_size):
+def get_batch_results(
+    sample, activated_experts, batch_i, batch_size, start_batch=0
+):
     res = {**sample}
     for key, expert_ids in activated_experts.items():
-        res[key] = expert_ids[batch_i].reshape(batch_size, -1, 2)
+        res[key] = expert_ids[batch_i - start_batch].reshape(batch_size, -1, 2)
     return res
 
 
@@ -123,10 +125,10 @@ What is the value of sum immediately after the 10th time line 3 is executed?"""
     print(f"output: \n{out}\n")
 
 
-def run_inference(args):
+def run_inference(args, start_batch=0):
 
     print("Datasets cache path: ", os.environ.get("HF_DATASETS_CACHE", ""))
-    print("Models cache path: ", os.environ.get("HF_HOME", ""))
+    print("Models cache path: ", os.environ.get("HF_HOME", ""))    
 
     runner = MoERunner.from_name(args.model, args.seq_len)
     dataloader = get_dataloader(args, runner.tokenizer)
@@ -136,16 +138,18 @@ def run_inference(args):
     # run_test_sequence(runner.tokenizer,runner.model)
 
     result = defaultdict(list)
-    save_step = int(len(dataloader) * 0.1)  # Save every 10% of the dataset
+    save_step = int(len(dataloader) * 0.1)  # Save every 10% of the dataset    
     for batch_i, sample in tqdm(
         iterable=enumerate(dataloader), total=len(dataloader)
     ):
+        if batch_i < start_batch:
+            continue
         activated_experts = runner(
             input_ids=sample["input_ids"],
             attention_mask=sample["attention_mask"],
         )
         batch_res = get_batch_results(
-            sample, activated_experts, batch_i, args.batch_size
+            sample, activated_experts, batch_i, args.batch_size, start_batch
         )
         for k, v in batch_res.items():
             result[k].extend(v)
