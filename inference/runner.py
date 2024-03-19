@@ -38,14 +38,28 @@ class MoERunner:
     ) -> LayerSelectedExperts:
         raise NotImplementedError()
 
+    def check_model_loaded(self):
+        if self.model is None:
+            raise Exception(
+                "Runner was initialised with 'tokenizer_only', it is not suitable for model call."
+            )
+
     @classmethod
     def from_name(
-        cls, name: Literal["openmoe", "mixtral"], seq_len: int, **kwargs
+        cls,
+        name: Literal["openmoe", "mixtral"],
+        seq_len: int,
+        tokenizer_only=False,
+        **kwargs,
     ) -> "MoERunner":
         if name == "openmoe":
-            return OpenMoERunner(seq_len, **kwargs)
+            return OpenMoERunner(
+                seq_len, tokenizer_only=tokenizer_only, **kwargs
+            )
         if name == "mixtral":
-            return MixtralRunner(seq_len, **kwargs)
+            return MixtralRunner(
+                seq_len, tokenizer_only=tokenizer_only, **kwargs
+            )
         raise NotImplementedError()
 
 
@@ -54,7 +68,7 @@ class OpenMoERunner(MoERunner):
     Wrapper class for outputing routed experts during Mixtral inference
     """
 
-    def __init__(self, seq_len: int, **kwargs) -> None:
+    def __init__(self, seq_len: int, tokenizer_only=False, **kwargs) -> None:
         self.model_name = f"OrionZheng/openmoe-8b-1T"
         self.tokenizer = AutoTokenizer.from_pretrained(
             "google/umt5-small", model_max_length=seq_len
@@ -66,13 +80,15 @@ class OpenMoERunner(MoERunner):
             moe_layer_interval=config.moe_layer_interval,
             enable_kernel=False,
         )
-        self.model = OpenMoeForCausalLM.from_pretrained(
-            self.model_name,
-            config=config,
-            device_map="auto",
-            torch_dtype=torch.float16,
-        )
-        self.activated_experts, hooks = set_router_hook(self.model)
+        self.model = None
+        if not tokenizer_only:
+            self.model = OpenMoeForCausalLM.from_pretrained(
+                self.model_name,
+                config=config,
+                device_map="auto",
+                torch_dtype=torch.float16,
+            )
+            self.activated_experts, hooks = set_router_hook(self.model)
 
     @torch.no_grad()
     def __call__(
@@ -81,6 +97,7 @@ class OpenMoERunner(MoERunner):
         attention_mask: Optional[torch.Tensor] = None,
         **kwargs: Any,
     ) -> LayerSelectedExperts:
+        self.check_model_loaded()
         if torch.cuda.is_available():
             input_ids = input_ids.cuda()
             attention_mask = attention_mask.cuda()
@@ -95,7 +112,9 @@ class MixtralRunner(MoERunner):
     Wrapper class for outputing routed experts during Mixtral inference
     """
 
-    def __init__(self, seq_len: int, use_quant=True, **kwargs) -> None:
+    def __init__(
+        self, seq_len: int, use_quant=True, tokenizer_only=False, **kwargs
+    ) -> None:
         if use_quant:
             self.model_name = "TheBloke/mixtral-8x7b-v0.1-AWQ"
         else:
@@ -104,21 +123,23 @@ class MixtralRunner(MoERunner):
             self.model_name, model_max_length=seq_len
         )
         self.tokenizer.pad_token = self.tokenizer.eos_token
+        self.model = None
+        if not tokenizer_only:
+            self.model = MixtralForCausalLM.from_pretrained(
+                self.model_name,
+                device_map="auto",
+                torch_dtype=torch.float16,
+                resume_download=True,
+            )
 
-        self.model = MixtralForCausalLM.from_pretrained(
-            self.model_name,
-            device_map="auto",
-            torch_dtype=torch.float16,
-            resume_download=True,
-        )
-
-    # @torch.no_grad()
+    @torch.no_grad()
     def __call__(
         self,
         input_ids: torch.LongTensor = None,
         attention_mask: Optional[torch.Tensor] = None,
         **kwargs: Any,
     ) -> LayerSelectedExperts:
+        self.check_model_loaded()
         if torch.cuda.is_available():
             input_ids = input_ids.cuda()
             attention_mask = attention_mask.cuda()
