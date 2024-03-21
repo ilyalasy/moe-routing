@@ -103,7 +103,9 @@ def stack_tensors(
     for k, v in dict_of_tensors.items():
         if isinstance(v[0], torch.Tensor):
             v = [t.cpu() for t in v] if to_cpu else v
-            dict_of_tensors[k] = torch.stack(v)
+            # consider last batch when it sizes are different
+            nested = torch.nested.nested_tensor(v)
+            dict_of_tensors[k] = nested.to_padded_tensor(0)
     return dict_of_tensors
 
 
