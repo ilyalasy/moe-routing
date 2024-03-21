@@ -5,6 +5,7 @@ import torch
 from inference.hooks import set_router_hook
 from inference.utils import set_openmoe_args
 from models.modelling_openmoe import OpenMoeForCausalLM
+from models.modelling_deepseek import DeepseekForCausalLM
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
@@ -47,7 +48,7 @@ class MoERunner:
     @classmethod
     def from_name(
         cls,
-        name: Literal["openmoe", "mixtral"],
+        name: Literal["openmoe", "mixtral", "deepseek"],
         seq_len: int,
         tokenizer_only=False,
         **kwargs,
@@ -58,6 +59,10 @@ class MoERunner:
             )
         if name == "mixtral":
             return MixtralRunner(
+                seq_len, tokenizer_only=tokenizer_only, **kwargs
+            )
+        if name == "deepseek":
+            return DeepSeekRunner(
                 seq_len, tokenizer_only=tokenizer_only, **kwargs
             )
         raise NotImplementedError()
@@ -88,7 +93,10 @@ class OpenMoERunner(MoERunner):
                 device_map="auto",
                 torch_dtype=torch.float16,
             )
-            self.activated_experts, hooks = set_router_hook(self.model)
+            self.model.eval()
+            self.activated_experts, hooks = set_router_hook(
+                self.model, "openmoe"
+            )
 
     @torch.no_grad()
     def __call__(
@@ -131,6 +139,7 @@ class MixtralRunner(MoERunner):
                 torch_dtype=torch.float16,
                 resume_download=True,
             )
+            self.model.eval()
 
     @torch.no_grad()
     def __call__(
@@ -157,4 +166,45 @@ class MixtralRunner(MoERunner):
             self.activated_experts[f"layer_{i}.router"].append(
                 selected_experts
             )
+        return self.activated_experts
+
+
+class DeepSeekRunner(MoERunner):
+    """
+    Wrapper class for outputing routed experts during DeepSeek inference
+    """
+
+    def __init__(self, seq_len: int, tokenizer_only=False, **kwargs) -> None:
+        self.model_name = "deepseek-ai/deepseek-moe-16b-base"
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.model_name, model_max_length=seq_len
+        )
+        self.tokenizer.pad_token = self.tokenizer.eos_token
+        self.model = None
+        if not tokenizer_only:
+            self.model = DeepseekForCausalLM.from_pretrained(
+                self.model_name,
+                device_map="auto",
+                torch_dtype=torch.float16,
+                resume_download=True,
+            )
+            self.model.eval()
+            self.activated_experts, hooks = set_router_hook(
+                self.model, "deepseek"
+            )
+
+    @torch.no_grad()
+    def __call__(
+        self,
+        input_ids: torch.LongTensor = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        **kwargs: Any,
+    ) -> LayerSelectedExperts:
+        self.check_model_loaded()
+        if torch.cuda.is_available():
+            input_ids = input_ids.cuda()
+            attention_mask = attention_mask.cuda()
+        self.model(
+            input_ids=input_ids, attention_mask=attention_mask, **kwargs
+        )
         return self.activated_experts

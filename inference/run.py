@@ -128,7 +128,7 @@ What is the value of sum immediately after the 10th time line 3 is executed?"""
 def run_inference(args, start_batch=0):
 
     print("Datasets cache path: ", os.environ.get("HF_DATASETS_CACHE", ""))
-    print("Models cache path: ", os.environ.get("HF_HOME", ""))    
+    print("Models cache path: ", os.environ.get("HF_HOME", ""))
 
     runner = MoERunner.from_name(args.model, args.seq_len)
     dataloader = get_dataloader(args, runner.tokenizer)
@@ -138,7 +138,7 @@ def run_inference(args, start_batch=0):
     # run_test_sequence(runner.tokenizer,runner.model)
 
     result = defaultdict(list)
-    save_step = int(len(dataloader) * 0.1)  # Save every 10% of the dataset    
+    save_step = int(len(dataloader) * 0.1)  # Save every 10% of the dataset
     for batch_i, sample in tqdm(
         iterable=enumerate(dataloader), total=len(dataloader)
     ):
@@ -156,12 +156,12 @@ def run_inference(args, start_batch=0):
 
         if batch_i % save_step == 0:
             output_file = f"{args.model}-experts-{batch_i}.pt"
-            batch_res = stack_tensors(result)
+            batch_res = stack_tensors(result, to_cpu=True)
             args.output.mkdir(parents=True, exist_ok=True)
             torch.save(batch_res, args.output / output_file)
             print(f"Saved to {args.output / output_file}")
 
-    result = stack_tensors(result)
+    result = stack_tensors(result, to_cpu=True)
     args.output.mkdir(parents=True, exist_ok=True)
     output_file = f"{args.model}-experts.pt"
     torch.save(result, args.output / output_file)
@@ -172,10 +172,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model",
-        default="mixtral",
+        default="deepseek",
         type=str,
         help="MoE Model name",
-        choices=["openmoe", "mixtral"],
+        choices=["openmoe", "mixtral", "deepseek"],
     )
     parser.add_argument(
         "--output", default="output", type=Path, help="output path"
@@ -188,7 +188,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--batch_size",
-        default=24,
+        default=32,
         type=int,
         help="batch size for model inference",
     )

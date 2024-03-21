@@ -21,4 +21,4 @@ See [EDA notebook](https://github.com/Misterion777/moe-experiments/blob/main/not
 
 ## TODO
 - [x] Support Mixtral
-- [ ] Support DeepSeek
+- [x] Support DeepSeek
