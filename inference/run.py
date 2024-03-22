@@ -60,7 +60,10 @@ def get_batch_results(
 ):
     res = {**sample}
     for key, expert_ids in activated_experts.items():
-        res[key] = expert_ids[batch_i - start_batch].reshape(batch_size, -1, 2)
+        experts_num = expert_ids[batch_i - start_batch].size(-1)
+        res[key] = expert_ids[batch_i - start_batch].reshape(
+            batch_size, -1, experts_num
+        )
     return res
 
 
