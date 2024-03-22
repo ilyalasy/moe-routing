@@ -7,3 +7,6 @@ accelerate=0.27.2=pypi_0
 transformers>=4.38.2
 black=24.2.0=pypi_0
 autoawq>=0.2.3
+bitsandbytes>=0.43.0
+flash-attn>=2.5.6
+matplotlib>=3.8.3

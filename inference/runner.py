@@ -13,6 +13,7 @@ from transformers import (
     MixtralForCausalLM,
     PreTrainedTokenizer,
     PreTrainedModel,
+    BitsAndBytesConfig,
 )
 from transformers.modeling_outputs import MoeCausalLMOutputWithPast
 import torch.nn.functional as F
@@ -29,6 +30,12 @@ class MoERunner:
     activated_experts = defaultdict(list)
     tokenizer: PreTrainedTokenizer
     model: PreTrainedModel
+    quant_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_compute_dtype=torch.float16,
+    )
 
     def __call__(
         self,
@@ -51,19 +58,20 @@ class MoERunner:
         name: Literal["openmoe", "mixtral", "deepseek"],
         seq_len: int,
         tokenizer_only=False,
+        use_quant=True,
         **kwargs,
     ) -> "MoERunner":
         if name == "openmoe":
             return OpenMoERunner(
-                seq_len, tokenizer_only=tokenizer_only, **kwargs
+                seq_len, use_quant, tokenizer_only=tokenizer_only, **kwargs
             )
         if name == "mixtral":
             return MixtralRunner(
-                seq_len, tokenizer_only=tokenizer_only, **kwargs
+                seq_len, use_quant, tokenizer_only=tokenizer_only, **kwargs
             )
         if name == "deepseek":
             return DeepSeekRunner(
-                seq_len, tokenizer_only=tokenizer_only, **kwargs
+                seq_len, use_quant, tokenizer_only=tokenizer_only, **kwargs
             )
         raise NotImplementedError()
 
@@ -73,7 +81,9 @@ class OpenMoERunner(MoERunner):
     Wrapper class for outputing routed experts during Mixtral inference
     """
 
-    def __init__(self, seq_len: int, tokenizer_only=False, **kwargs) -> None:
+    def __init__(
+        self, seq_len: int, use_quant=True, tokenizer_only=False, **kwargs
+    ) -> None:
         self.model_name = f"OrionZheng/openmoe-8b-1T"
         self.tokenizer = AutoTokenizer.from_pretrained(
             "google/umt5-small", model_max_length=seq_len
@@ -92,6 +102,7 @@ class OpenMoERunner(MoERunner):
                 config=config,
                 device_map="auto",
                 torch_dtype=torch.float16,
+                quantization_config=self.quant_config if use_quant else None,
             )
             self.model.eval()
             self.activated_experts, hooks = set_router_hook(
@@ -174,19 +185,23 @@ class DeepSeekRunner(MoERunner):
     Wrapper class for outputing routed experts during DeepSeek inference
     """
 
-    def __init__(self, seq_len: int, tokenizer_only=False, **kwargs) -> None:
+    def __init__(
+        self, seq_len: int, use_quant=True, tokenizer_only=False, **kwargs
+    ) -> None:
         self.model_name = "deepseek-ai/deepseek-moe-16b-base"
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.model_name, model_max_length=seq_len
         )
         self.tokenizer.pad_token = self.tokenizer.eos_token
         self.model = None
+
         if not tokenizer_only:
             self.model = DeepseekForCausalLM.from_pretrained(
                 self.model_name,
                 device_map="auto",
                 torch_dtype=torch.float16,
                 resume_download=True,
+                quantization_config=self.quant_config if use_quant else None,
             )
             self.model.eval()
             self.activated_experts, hooks = set_router_hook(
